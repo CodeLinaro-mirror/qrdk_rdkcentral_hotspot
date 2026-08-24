@@ -1375,6 +1375,18 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
                          if((strncmp(val, "0.0.0.0", ipaddr_length) == 0))
                          {
                              CcspTraceInfo(("current_wan_ipaddr is %s\n", val));
+                             /* Probable fix: Reset old_wan_ipv4 in bridge mode when WAN Manager temporarily tears
+ 				            * down erouter0. This forces recreate_tunnel() to rebuild gretap0 even
+ 				            * when the same WAN IP is reassigned after the interface is recreated.
+ 				            * Router-mode behavior remains unchanged.
+ 			                */
+                             char bridge_mode[8] = {0};
+                             sysevent_get(sysevent_fd_gs, sysevent_token_gs, "bridge_mode", bridge_mode, sizeof(bridge_mode));
+                             if (atoi(bridge_mode) != 0)
+                             {
+                                 CcspTraceInfo(("bridge_mode=%s, resetting old_wan_ipv4 to force recreate_tunnel on WAN recovery\n", bridge_mode));
+                                 strcpy_s(old_wan_ipv4, sizeof(old_wan_ipv4), "0.0.0.0");
+                             }
                          }
                          else if((strncmp(val,old_wan_ipv4, ipaddr_length) == 0))
                          {
