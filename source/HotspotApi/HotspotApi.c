@@ -1552,10 +1552,22 @@ static int wanfailover_handleTunnel(bool create)
                                 gVlanSyncData[index].bridgeName));
         }
     } else {
-        //Bringup Interface . Below function will either restore from nvram or from the
-        //tmp hotspot json.
+        char curr_wan_ifname[64] = {0};
+
         CcspTraceInfo(("HOTSPOT_LIB : %s Bringing up the Hotspot N/W\n", __FUNCTION__));
-        jansson_rollback_tunnel_info();
+
+        //Only build the tunnel when the active WAN is back to the default WAN; a remote-wan
+        //interface here means we are still on the failover link and have no route to the GRE endpoint.
+        if ((get_current_wan_ifname(curr_wan_ifname, sizeof(curr_wan_ifname)) != NULL) &&
+            (strcmp(curr_wan_ifname, WAN_IF) == 0)) {
+            //Bringup Interface . Below function will either restore from nvram or from the
+            //tmp hotspot json.
+            jansson_rollback_tunnel_info();
+        }
+        else {
+            CcspTraceInfo(("HOTSPOT_LIB : %s Current WAN interface(%s) is not the default WAN(%s), skipping tunnel creation\n",
+                            __FUNCTION__, curr_wan_ifname, WAN_IF));
+        }
     }
     return 0;
 }
@@ -1608,7 +1620,16 @@ int hotspot_wan_failover(bool remote_wan_enabled)
 
 void recreate_tunnel(){
     char cmdBuf[1024];
+    char curr_wan_ifname[64] = {0};
     int offset;
+
+    //Skip rebuilding while on a remote-wan/failover interface, there is no route to the GRE endpoint
+    if ((get_current_wan_ifname(curr_wan_ifname, sizeof(curr_wan_ifname)) != NULL) &&
+        (strcmp(curr_wan_ifname, WAN_IF) != 0)) {
+        CcspTraceInfo(("HOTSPOT_LIB : %s Current WAN interface(%s) is not the default WAN(%s), skipping tunnel recreate\n",
+                        __FUNCTION__, curr_wan_ifname, WAN_IF));
+        return;
+    }
 
     offset = snprintf(cmdBuf, sizeof(cmdBuf), "%s %s", IP_DEL, GRE_IFNAME);
     CcspTraceInfo(("HOTSPOT_LIB : Buffer for deleting gre tunnel = %s %d\n", cmdBuf, offset));

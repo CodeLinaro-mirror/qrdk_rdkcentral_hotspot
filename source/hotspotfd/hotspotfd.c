@@ -1081,9 +1081,6 @@ STATIC bool hotspotfd_isValidIpAddress(char *ipAddress)
 }
 
 #ifdef WAN_FAILOVER_SUPPORTED
-/* Last CurrentActiveInterface value we actually acted on, used to drop duplicate notifications */
-STATIC char old_wan_active_iface[kMax_IPAddressLength] = {0};
-
 STATIC bool hotspot_isRemoteWan(char *wan_interface)
 {
      char psm_val[128] = {0};
@@ -1127,14 +1124,6 @@ STATIC bool hotspot_check_wan_failover_status(char *val)
      strncpy(cbuff, val, sizeof(cbuff) - 1);
      cbuff[sizeof(cbuff) - 1] = '\0';
      CcspTraceInfo(("HotspotTunnelEvent : %s New value of CurrentActiveInterface is -= %s\n",__FUNCTION__, cbuff));
-
-     if (strncmp(cbuff, old_wan_active_iface, sizeof(old_wan_active_iface) - 1) == 0) {
-         CcspTraceInfo(("HotspotTunnelEvent : %s CurrentActiveInterface unchanged (%s), skipping duplicate tunnel rebuild\n", __FUNCTION__, cbuff));
-         return wanFailover;
-     }
-     strncpy(old_wan_active_iface, cbuff, sizeof(old_wan_active_iface) - 1);
-     old_wan_active_iface[sizeof(old_wan_active_iface) - 1] = '\0';
-
      isRemoteWANEnabled = hotspot_isRemoteWan(cbuff);
      hotspot_wan_failover(isRemoteWANEnabled);
      if(isRemoteWANEnabled)
@@ -1398,12 +1387,7 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
                              if (sysevent_set(sysevent_fd_gs, sysevent_token_gs, "old_wan_ipv4addr", old_wan_ipv4, 0)){
                                  CcspTraceError(("sysevent_set failed to set old_wan_ipv4addr\n"));
                              }
-                             if (wanFailover) {
-                                 CcspTraceInfo(("On Remote WAN failover, skipping tunnel recreate for current_wan_ipaddr change\n"));
-                             }
-                             else {
-                                 recreate_tunnel();
-                             }
+                             recreate_tunnel();
                          }
                      }
                  }
@@ -1433,12 +1417,7 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
                              if (sysevent_set(sysevent_fd_gs, sysevent_token_gs, "old_wan_ipv6addr", old_wan_ipv6, 0)){
                                 CcspTraceError(("sysevent_set failed to set old_wan_ipv6addr\n"));
                              }
-                             if (wanFailover) {
-                                 CcspTraceInfo(("On Remote WAN failover, skipping tunnel recreate for wan6_ipaddr change\n"));
-                             }
-                             else {
-                                 recreate_tunnel();
-                             }
+                             recreate_tunnel();
                         }
                      }
                  }
@@ -1446,10 +1425,6 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
 
 #ifdef WAN_FAILOVER_SUPPORTED
             else if (ret_value == CURRENT_WAN_IFNAME || ret_value == TEST_CURRENT_WAN_IFNAME) {
-                 if (ret_value == TEST_CURRENT_WAN_IFNAME) {
-                     /* Manual test trigger: always force re-evaluation, bypass duplicate-value guard */
-                     old_wan_active_iface[0] = '\0';
-                 }
                  hotspot_check_wan_failover_status(val);
             }
 #endif
