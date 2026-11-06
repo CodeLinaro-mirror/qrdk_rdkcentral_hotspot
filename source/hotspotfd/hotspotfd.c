@@ -158,6 +158,7 @@ STATIC token_t sysevent_token;
 STATIC int sysevent_fd_gs;
 STATIC token_t sysevent_token_gs;
 STATIC pthread_t sysevent_tid;
+STATIC volatile sig_atomic_t gSyseventClosed = 0;
 #endif
 
 STATIC int gShm_fd;
@@ -997,6 +998,7 @@ STATIC void hotspotfd_SignalHandler(int signo)
 
 #ifdef __HAVE_SYSEVENT__
     msg_debug("Closing sysevent and shared memory\n");
+    gSyseventClosed = 1;
     sysevent_close(sysevent_fd, sysevent_token);
     sysevent_close(sysevent_fd_gs, sysevent_token_gs);
 #endif
@@ -1234,6 +1236,10 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
     }
 
     for (;;) {
+        /* Stop polling once the signal handler has closed the sysevent connection */
+        if (gSyseventClosed) {
+            break;
+        }
 	/* Coverity Fix CID : 140441 STRING_OVERFLOW */
         //sysevent name length and value length should be less than 32 abd 64 bytes while setting, if it more then please modify the below static array name and val
         char name[32], val[64];
@@ -1510,8 +1516,12 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
                 }
             }
         }
-        else
+        else if (!gSyseventClosed)
             CcspTraceError(("%s:%d,Error:%d\n",__FUNCTION__,__LINE__,err));
+
+        if (gSyseventClosed) {
+            break;
+        }
         hotspotfd_log();
     }
 
