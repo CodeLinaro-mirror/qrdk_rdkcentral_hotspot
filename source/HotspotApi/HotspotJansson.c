@@ -149,8 +149,9 @@ bool jansson_rollback_tunnel_info() {
         gre_enable = json_boolean_value(jgre_enable);
     }
     CcspTraceInfo(("HOTSPOT_LIB : file load hotspot gre_enable...%d \n", gre_enable));
+    int tunnelStatus = 0;
     if(gre_enable){
-        create_tunnel(priEndIp);
+        tunnelStatus = create_tunnel(priEndIp);
         gXfinityEnable = true;
     }
     else
@@ -168,6 +169,10 @@ bool jansson_rollback_tunnel_info() {
     json_t *jsonVapID = NULL;
 
     if(json_is_array(json_vap_name) && json_is_array(json_wan_vlan) && json_is_array(json_vap_enable)){
+        if (gre_enable && tunnelStatus != 0) {
+            CcspTraceInfo(("HOTSPOT_LIB : Skipping VAP bridge/VLAN rollback, GRE tunnel was not created\n"));
+        }
+        else {
         CcspTraceInfo(("HOTSPOT_LIB : file load EP in array json \n"));
         for(i = 0; i < count; i++){
              jsonVapName = json_array_get(json_vap_name, i);
@@ -183,6 +188,7 @@ bool jansson_rollback_tunnel_info() {
          }
          //hotspot_sysevent_enable_param();
          //firewall_restart();
+        }
      }
 #if defined (AMENITIES_NETWORK_ENABLED)
      if (gre_enable) {
