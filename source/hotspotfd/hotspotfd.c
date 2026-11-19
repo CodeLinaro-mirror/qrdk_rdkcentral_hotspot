@@ -158,6 +158,7 @@ STATIC token_t sysevent_token;
 STATIC int sysevent_fd_gs;
 STATIC token_t sysevent_token_gs;
 STATIC pthread_t sysevent_tid;
+STATIC volatile sig_atomic_t gSyseventClosed = 0;
 #endif
 
 STATIC int gShm_fd;
@@ -722,7 +723,7 @@ STATIC unsigned short hotspotfd_checksum(void *pdata, int len)
 
     sum = (sum >> 16) + (sum & 0xFFFF);
     sum += (sum >> 16);
-    result = ~sum; 
+    result = (unsigned short)((~sum) & 0xFFFFU);
 
     return result;
 }
@@ -997,6 +998,7 @@ STATIC void hotspotfd_SignalHandler(int signo)
 
 #ifdef __HAVE_SYSEVENT__
     msg_debug("Closing sysevent and shared memory\n");
+    gSyseventClosed = 1;
     sysevent_close(sysevent_fd, sysevent_token);
     sysevent_close(sysevent_fd_gs, sysevent_token_gs);
 #endif
@@ -1234,6 +1236,10 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
     }
 
     for (;;) {
+        /* Stop polling once the signal handler has closed the sysevent connection */
+        if (gSyseventClosed) {
+            break;
+        }
 	/* Coverity Fix CID : 140441 STRING_OVERFLOW */
         //sysevent name length and value length should be less than 32 abd 64 bytes while setting, if it more then please modify the below static array name and val
         char name[32], val[64];
@@ -1261,10 +1267,9 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
 
                 msg_debug("gpPrimaryEP: %s\n", gpPrimaryEP);
 
-		CcspTraceInfo((" GRE flag set to %d in sysevent handler \n", gbFirstPrimarySignal));				
-
                 pthread_mutex_lock(&keep_alive_mutex);
                 gbFirstPrimarySignal = true;
+		CcspTraceInfo((" GRE flag set to %d in sysevent handler \n", gbFirstPrimarySignal));
                 pthread_mutex_unlock(&keep_alive_mutex);
             } else if (ret_value == HOTSPOTFD_SECONDARY) {
                 rc = strcpy_s(gpSecondaryEP, sizeof(gpSecondaryEP), val); 
@@ -1510,8 +1515,12 @@ STATIC void *hotspotfd_sysevent_handler(void *data)
                 }
             }
         }
-        else
+        else if (!gSyseventClosed)
             CcspTraceError(("%s:%d,Error:%d\n",__FUNCTION__,__LINE__,err));
+
+        if (gSyseventClosed) {
+            break;
+        }
         hotspotfd_log();
     }
 
@@ -2172,7 +2181,17 @@ Try_primary:
                     hotspotfd_log();
                 }
 
+		bool processFirstPrimarySignal = false;
+
+                pthread_mutex_lock(&keep_alive_mutex);
                 if (gbFirstPrimarySignal) {
+                    gbFirstPrimarySignal = false;
+		    processFirstPrimarySignal = true;
+		    CcspTraceInfo(("Primary GRE flag set to %d\n", gbFirstPrimarySignal));
+		}
+                pthread_mutex_unlock(&keep_alive_mutex);
+
+                if (processFirstPrimarySignal) {
 
                     if(ssid_reset_mask != 0) 
                     {
@@ -2212,10 +2231,6 @@ Try_primary:
 		    #endif
 		    gTunnelIsUp=true;
 					
-                    pthread_mutex_lock(&keep_alive_mutex);
-                    gbFirstPrimarySignal = false;
-                    pthread_mutex_unlock(&keep_alive_mutex);
-                    CcspTraceInfo(("Primary GRE flag set to %d\n", gbFirstPrimarySignal));
                     if(switchedFromSecondary)
                     {
                         gSwitchedBackToPrimary++;
@@ -2369,9 +2384,18 @@ Try_secondary:
                      else {
                                    CcspTraceInfo(("SSID's are not updated after tunnel deletion. \n"));
                           }    
-                }    
+                }
 
+		bool processFirstSecondarySignal = false;
+
+		pthread_mutex_lock(&keep_alive_mutex);
                 if (gbFirstSecondarySignal) {
+			gbFirstSecondarySignal = false;
+			processFirstSecondarySignal = true;
+		}
+		pthread_mutex_unlock(&keep_alive_mutex);
+
+                if (processFirstSecondarySignal) {
                     CcspTraceInfo(("Create Secondary GRE tunnel with endpoint:%s\n", gpSecondaryEP));
 
                     if (sysevent_set(sysevent_fd_gs, sysevent_token_gs, 
@@ -2389,11 +2413,7 @@ Try_secondary:
                     #if (defined (_COSA_BCM_ARM_) && !defined(_XB6_PRODUCT_REQ_))
                     hotspotfd_syncMultinet();
 		    #endif
-		    gTunnelIsUp=true;
-					
-                    pthread_mutex_lock(&keep_alive_mutex);
-                    gbFirstSecondarySignal = false;
-                    pthread_mutex_unlock(&keep_alive_mutex);
+		    gTunnelIsUp=true;    
                 }
 
                 msg_debug("Secondary GRE Tunnel Endpoint is alive\n");
